@@ -1,0 +1,9 @@
+{
+  "target": "esp32s3",
+  "builds": [
+    {
+      "name": "jc3248w535",
+      "sdkconfig_append": []
+    }
+  ]
+}

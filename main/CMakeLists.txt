@@ -118,6 +118,8 @@ elseif(CONFIG_BOARD_TYPE_XINGZHI_Cube_1_54TFT_WIFI)
     set(BOARD_TYPE "xingzhi-cube-1.54tft-wifi")
 elseif(CONFIG_BOARD_TYPE_XINGZHI_Cube_1_54TFT_ML307)
     set(BOARD_TYPE "xingzhi-cube-1.54tft-ml307")
+elseif(CONFIG_BOARD_TYPE_JC3248W535)
+    set(BOARD_TYPE "jc3248w535")
 elseif(CONFIG_BOARD_TYPE_SENSECAP_WATCHER)
     set(BOARD_TYPE "sensecap-watcher")
 endif()
@@ -181,16 +183,16 @@ target_compile_definitions(${COMPONENT_LIB}
                     )
 
 # 添加生成规则
-add_custom_command(
-    OUTPUT ${LANG_HEADER}
-    COMMAND python ${PROJECT_DIR}/scripts/gen_lang.py
-            --input "${LANG_JSON}"
-            --output "${LANG_HEADER}"
-    DEPENDS
-        ${LANG_JSON}
-        ${PROJECT_DIR}/scripts/gen_lang.py
-    COMMENT "Generating ${LANG_DIR} language config"
-)
+# add_custom_command(
+#     OUTPUT ${LANG_HEADER}
+#     COMMAND python ${PROJECT_DIR}/scripts/gen_lang.py
+#             --input "${LANG_JSON}"
+#             --output "${LANG_HEADER}"
+#     DEPENDS
+#         ${LANG_JSON}
+#         ${PROJECT_DIR}/scripts/gen_lang.py
+#     COMMENT "Generating ${LANG_DIR} language config"
+# )
 
 # 强制建立生成依赖
 add_custom_target(lang_header ALL
