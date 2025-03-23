@@ -25,8 +25,8 @@
 
 #define TAG "jc3248w535_board"
 
-LV_FONT_DECLARE(font_puhui_14_1);
-LV_FONT_DECLARE(font_awesome_14_1);
+LV_FONT_DECLARE(font_puhui_20_4);
+LV_FONT_DECLARE(font_awesome_20_4);
 
 typedef struct
 {
@@ -47,32 +47,35 @@ private:
 
     void InitializePowerSaveTimer()
     {
-        // power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
-        // power_save_timer_->OnEnterSleepMode(
-        //     [this]()
-        //     {
-        //         ESP_LOGI(TAG, "Enabling sleep mode");
-        //         auto display = GetDisplay();
-        //         display->SetChatMessage("system", "");
-        //         display->SetEmotion("sleepy");
-        //         GetBacklight()->SetBrightness(10);
-        //     });
-        // power_save_timer_->OnExitSleepMode(
-        //     [this]()
-        //     {
-        //         auto display = GetDisplay();
-        //         display->SetChatMessage("system", "");
-        //         display->SetEmotion("neutral");
-        //         GetBacklight()->RestoreBrightness();
-        //     });
-        // power_save_timer_->OnShutdownRequest(
-        //     [this]()
-        //     {
-        //         ESP_LOGI(TAG, "Shutting down");
-        //         // IoExpanderSetLevel(BSP_PWR_LCD, 0);
-        //         // IoExpanderSetLevel(BSP_PWR_SYSTEM, 0);
-        //     });
-        // power_save_timer_->SetEnabled(true);
+        power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
+        power_save_timer_->OnEnterSleepMode(
+            [this]()
+            {
+                ESP_LOGI(TAG, "Enabling sleep mode");
+                auto display = GetDisplay();
+                display->SetChatMessage("system", "");
+                display->SetEmotion("sleepy");
+                GetBacklight()->SetBrightness(10);
+            });
+        power_save_timer_->OnExitSleepMode(
+            [this]()
+            {
+                auto display = GetDisplay();
+                display->SetChatMessage("system", "");
+                display->SetEmotion("neutral");
+                GetBacklight()->RestoreBrightness();
+            });
+        power_save_timer_->OnShutdownRequest(
+            [this]()
+            {
+                ESP_LOGI(TAG, "Shutting down");
+                // rtc_gpio_set_level(GPIO_NUM_21, 0);
+                // // 启用保持功能，确保睡眠期间电平不变
+                // rtc_gpio_hold_en(GPIO_NUM_21);
+                esp_lcd_panel_disp_on_off(panel_, false); // 关闭显示
+                esp_deep_sleep_start();
+            });
+        power_save_timer_->SetEnabled(true);
     }
 
     void InitializeI2c()
@@ -205,25 +208,6 @@ private:
         };
         esp_lcd_new_panel_io_i2c(i2c_bus_, &tp_io_config, &tp_io_handle);
         esp_lcd_touch_new_i2c_axs15231b(tp_io_handle, &tp_cfg, &touch_);
-
-        // touch_ctx = (touch_int_t *)malloc(sizeof(touch_int_t));
-        // // ESP_GOTO_ON_FALSE(touch_ctx, ESP_ERR_NO_MEM, err, TAG, "Not enough memory for touch_ctx allocation!");
-
-        // if ( tp_cfg.int_gpio_num > 0 )
-        // {
-
-        //     tp_intr_event = xSemaphoreCreateBinary();
-        //     // ESP_GOTO_ON_FALSE(tp_intr_event, ESP_ERR_NO_MEM, err, TAG,
-        //     //   "Not enough memory for tp_intr_event allocation!");
-        //     touch_ctx->tp_intr_event = tp_intr_event;
-        //     esp_lcd_touch_register_interrupt_callback_with_data(touch_, touch_interrupt_cb, (void *)touch_ctx);
-        // }
-        // else
-        // {
-        //     touch_ctx->tp_intr_event = NULL;
-        // }
-        // // touch_ctx->rotate = config->rotate;
-        // touch_->config.user_data = touch_ctx;
     }
 
     void InitializeButtons()
@@ -260,8 +244,9 @@ private:
 
         ESP_LOGI(TAG, "Install axs15231b panel driver");
         const axs15231b_vendor_config_t vendor_config = {
-            .width = DISPLAY_WIDTH,
-            .height = DISPLAY_HEIGHT,
+            .h_res = DISPLAY_WIDTH,
+            .v_res = DISPLAY_HEIGHT,
+            .bb_size = DISPLAY_WIDTH * 10,
             .flags =
                 {
                     .use_qspi_interface = 1,
@@ -283,18 +268,22 @@ private:
         display_ = new SpiLcdDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X,
                                      DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
                                      {
-                                         .text_font = &font_puhui_14_1,
-                                         .icon_font = &font_awesome_14_1,
-                                         .emoji_font = font_emoji_32_init(),
+                                         .text_font = &font_puhui_20_4,
+                                         .icon_font = &font_awesome_20_4,
+                                         .emoji_font = font_emoji_64_init(),
                                      });
 
-        // /* Add touch input (for selected screen) */
-        // const lvgl_port_touch_cfg_t touch_cfg = {
-        //     .disp = display_->GetLvDisplay(),
-        //     .handle = touch_,
-        // };
+        lv_display_t *lv_display = display_->GetLvDisplay();
 
-        // lvgl_port_add_touch(&touch_cfg);
+        // lv_display_set_rotation(lv_display, LV_DISPLAY_ROTATION_90);
+
+        /* Add touch input (for selected screen) */
+        const lvgl_port_touch_cfg_t touch_cfg = {
+            .disp = lv_display,
+            .handle = touch_,
+        };
+
+        lvgl_port_add_touch(&touch_cfg);
     }
 
     // 物联网初始化，添加对 AI 可见设备
@@ -310,11 +299,11 @@ public:
         : boot_button_(BOOT_BUTTON_GPIO)
     {
         ESP_LOGI(TAG, "Initialize jc3248w535 board");
-        // InitializeI2c();
-        // InitializeAxs15231bTouchpad();
+        InitializeI2c();
+        InitializeAxs15231bTouchpad();
         InitializeSpi();
         InitializeAxs15231bDisplay();
-        // InitializePowerSaveTimer();
+        InitializePowerSaveTimer();
         InitializeButtons();
         InitializeIot();
         GetBacklight()->RestoreBrightness();

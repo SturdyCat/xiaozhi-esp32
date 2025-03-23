@@ -19,8 +19,8 @@
 #define AUDIO_I2S_MIC_GPIO_SCK          (GPIO_NUM_6)
 #define AUDIO_I2S_MIC_GPIO_DIN          (GPIO_NUM_7)
 
-#define DISPLAY_WIDTH                   120
-#define DISPLAY_HEIGHT                  60
+#define DISPLAY_WIDTH                   320
+#define DISPLAY_HEIGHT                  480
 #define DISPLAY_MIRROR_X                false
 #define DISPLAY_MIRROR_Y                false
 #define DISPLAY_SWAP_XY                 false

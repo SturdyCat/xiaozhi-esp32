@@ -17,16 +17,17 @@
 #include "esp_log.h"
 #include "esp_check.h"
 #include "esp_lcd_touch.h"
-#include "esp_async_memcpy.h"
 
 #include "esp_lcd_axs15231b.h"
 
 /*max point num*/
-#define AXS_MAX_TOUCH_NUMBER   (1)
+#define AXS_MAX_TOUCH_NUMBER     (1)
 
-#define LCD_OPCODE_WRITE_CMD   (0x02ULL)
-#define LCD_OPCODE_READ_CMD    (0x0BULL)
-#define LCD_OPCODE_WRITE_COLOR (0x32ULL)
+#define LCD_OPCODE_WRITE_CMD     (0x02ULL)
+#define LCD_OPCODE_READ_CMD      (0x0BULL)
+#define LCD_OPCODE_WRITE_COLOR   (0x32ULL)
+
+#define LCD_PANEL_BOUNCE_BUF_NUM (2)
 
 static const char *TAG = "lcd_panel.axs15231b";
 
@@ -63,11 +64,15 @@ typedef struct
     const axs15231b_lcd_init_cmd_t *init_cmds;
     uint16_t init_cmds_size;
 
+    uint16_t h_res; /*!< Horizontal resolution, i.e. the number of pixels in a line */
+    uint16_t v_res; /*!< Vertical resolution, i.e. the number of lines in the frame  */
+    size_t bb_size; // Size of the bounce buffer, in bytes. If not-zero, the driver uses two bounce buffers allocated
+    uint8_t *bounce_buffer[LCD_PANEL_BOUNCE_BUF_NUM]; // Pointer to the bounce buffers
+    // from internal memory
+
     uint8_t *buff1;
     uint8_t *buff2;
-    size_t trans_size;
-    uint16_t width;
-    uint16_t height;
+
     struct
     {
         unsigned int use_qspi_interface : 1;
@@ -82,6 +87,7 @@ esp_err_t esp_lcd_new_panel_axs15231b(const esp_lcd_panel_io_handle_t io,
     esp_err_t ret = ESP_OK;
     axs15231b_panel_t *axs15231b = NULL;
     uint8_t fb_bits_per_pixel = 0;
+    axs15231b_vendor_config_t *vendor_config = ((axs15231b_vendor_config_t *)panel_dev_config->vendor_config);
     ESP_GOTO_ON_FALSE(io && panel_dev_config && ret_panel, ESP_ERR_INVALID_ARG, err, TAG, "invalid argument");
     axs15231b = (axs15231b_panel_t *)calloc(1, sizeof(axs15231b_panel_t));
     ESP_GOTO_ON_FALSE(axs15231b, ESP_ERR_NO_MEM, err, TAG, "no mem for axs15231b panel");
@@ -118,28 +124,31 @@ esp_err_t esp_lcd_new_panel_axs15231b(const esp_lcd_panel_io_handle_t io,
     }
 
     axs15231b->io = io;
-    axs15231b->fb_bits_per_pixel = fb_bits_per_pixel / 8;
+    axs15231b->fb_bits_per_pixel = fb_bits_per_pixel;
     axs15231b->reset_gpio_num = (gpio_num_t)panel_dev_config->reset_gpio_num;
     axs15231b->flags.reset_level = panel_dev_config->flags.reset_active_high;
-    if ( panel_dev_config->vendor_config )
+    if ( vendor_config )
     {
-        axs15231b->init_cmds = ((axs15231b_vendor_config_t *)panel_dev_config->vendor_config)->init_cmds;
-        axs15231b->init_cmds_size = ((axs15231b_vendor_config_t *)panel_dev_config->vendor_config)->init_cmds_size;
-        axs15231b->flags.use_qspi_interface =
-            ((axs15231b_vendor_config_t *)panel_dev_config->vendor_config)->flags.use_qspi_interface;
+        axs15231b->init_cmds = vendor_config->init_cmds;
+        axs15231b->init_cmds_size = vendor_config->init_cmds_size;
+        axs15231b->flags.use_qspi_interface = vendor_config->flags.use_qspi_interface;
 
-        // axs15231b->width = ((axs15231b_vendor_config_t *)panel_dev_config->vendor_config)->width;
-        // axs15231b->height = ((axs15231b_vendor_config_t *)panel_dev_config->vendor_config)->height;
-        // axs15231b->trans_size = axs15231b->width * axs15231b->height / 10;
-        // axs15231b->buff1 =
-        //     (uint8_t *)heap_caps_aligned_alloc(1, axs15231b->trans_size * axs15231b->fb_bits_per_pixel,
-        //     MALLOC_CAP_DMA);
-        // ESP_GOTO_ON_FALSE(axs15231b->buff1, ESP_ERR_NO_MEM, err, TAG, "Not enough memory for lcd buf1 allocation!");
-        // axs15231b->buff2 =
-        //     (uint8_t *)heap_caps_aligned_alloc(1, axs15231b->trans_size * axs15231b->fb_bits_per_pixel,
-        //     MALLOC_CAP_DMA);
-        // ESP_GOTO_ON_FALSE(axs15231b->buff1, ESP_ERR_NO_MEM, err, TAG, "Not enough memory for lcd buf2 allocation!");
+        axs15231b->h_res = vendor_config->h_res;
+        axs15231b->v_res = vendor_config->v_res;
+        axs15231b->bb_size = vendor_config->bb_size;
+        if ( axs15231b->bb_size )
+        {
+            for ( int i = 0; i < LCD_PANEL_BOUNCE_BUF_NUM; i++ )
+            {
+                // bounce buffer must be allocated from internal memory for performance
+                axs15231b->bounce_buffer[i] =
+                    (uint8_t *)heap_caps_aligned_alloc(1, axs15231b->bb_size * axs15231b->fb_bits_per_pixel / 8,
+                                                       MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+                ESP_RETURN_ON_FALSE(axs15231b->bounce_buffer[i], ESP_ERR_NO_MEM, TAG, "no mem for bounce buffer");
+            }
+        }
     }
+
     axs15231b->base.del = panel_axs15231b_del;
     axs15231b->base.reset = panel_axs15231b_reset;
     axs15231b->base.init = panel_axs15231b_init;
@@ -158,19 +167,8 @@ esp_err_t esp_lcd_new_panel_axs15231b(const esp_lcd_panel_io_handle_t io,
 err:
     if ( axs15231b )
     {
-        if ( axs15231b->reset_gpio_num >= 0 )
-        {
-            gpio_reset_pin(axs15231b->reset_gpio_num);
-        }
-        if ( axs15231b->buff1 )
-        {
-            free(axs15231b->buff1);
-        }
-        if ( axs15231b->buff2 )
-        {
-            free(axs15231b->buff2);
-        }
-        free(axs15231b);
+
+        panel_axs15231b_del((esp_lcd_panel_t *)axs15231b);
     }
     return ret;
 }
@@ -389,115 +387,103 @@ static esp_err_t panel_axs15231b_init(esp_lcd_panel_t *panel)
     return ESP_OK;
 }
 
-// // 回调实现，在 ISR 上下文中运行
-// static bool my_async_memcpy_cb(async_memcpy_handle_t mcp_hdl, async_memcpy_event_t *event, void *cb_args)
-// {
-//     SemaphoreHandle_t sem = (SemaphoreHandle_t)cb_args;
-//     BaseType_t high_task_wakeup = pdFALSE;
-//     xSemaphoreGiveFromISR(semphr, &high_task_wakeup); // 如果解锁了一些高优先级任务，则将 high_task_wakeup 设置为
-//     pdTRUE return high_task_wakeup == pdTRUE;
-// }
-
-// // 创建一个信号量，在异步 memcpy 完成时进行报告
-// SemaphoreHandle_t semphr = xSemaphoreCreateBinary();
-
-// // 从用户的上下文中调用
-// ESP_ERROR_CHECK(esp_async_memcpy(driver_handle, to, from, copy_len, my_async_memcpy_cb, my_semaphore));
-// // 其他事项
-// xSemaphoreTake(my_semaphore, portMAX_DELAY); // 等待 buffer 复制完成
-
-static esp_err_t panel_axs15231b_draw_bitmap(esp_lcd_panel_t *panel, int x_start, int y_start, int x_end, int y_end,
-                                             const void *color_data)
+static IRAM_ATTR esp_err_t panel_axs15231b_draw_bitmap(esp_lcd_panel_t *panel, int x_start, int y_start, int x_end,
+                                                       int y_end, const void *color_data)
 {
     axs15231b_panel_t *axs15231b = __containerof(panel, axs15231b_panel_t, base);
     assert((x_start < x_end) && (y_start < y_end) && "start position must be smaller than end position");
     esp_lcd_panel_io_handle_t io = axs15231b->io;
+    uint8_t bytes_per_pixel = axs15231b->fb_bits_per_pixel / 8;
 
     x_start += axs15231b->x_gap;
     x_end += axs15231b->x_gap;
     y_start += axs15231b->y_gap;
     y_end += axs15231b->y_gap;
 
-    tx_param(axs15231b, io, LCD_CMD_CASET,
-             (uint8_t[]){
-                 static_cast<uint8_t>((x_start >> 8) & 0xFF),
-                 static_cast<uint8_t>((x_start) & 0xFF),
-                 static_cast<uint8_t>(((x_end - 1) >> 8) & 0xFF),
-                 static_cast<uint8_t>((x_end - 1) & 0xFF),
-             },
-             4);
+    uint16_t x_draw_start;
+    uint16_t x_draw_end;
+    uint16_t y_draw_start;
+    uint16_t y_draw_end;
 
-    tx_color(axs15231b, io, LCD_CMD_RAMWR, color_data,
-             (x_end - x_start) * (y_end - y_start) * axs15231b->fb_bits_per_pixel);
+    uint16_t y_start_tmp;
+    uint16_t y_end_tmp;
 
-    // uint16_t x_draw_start;
-    // uint16_t x_draw_end;
-    // uint16_t y_draw_start;
-    // uint16_t y_draw_end;
+    uint16_t trans_count;
+    uint16_t max_line;
 
-    // uint16_t y_start_tmp;
-    // uint16_t y_end_tmp;
+    const uint16_t width = x_end - x_start;
+    const uint16_t height = y_end - y_start;
+    const size_t trans_size = axs15231b->bb_size;
 
-    // uint16_t trans_count;
-    // uint16_t max_line;
+    y_start_tmp = y_start;
+    max_line = ((trans_size / width) > height) ? (height) : (trans_size / width);
+    trans_count = height / max_line + (height % max_line ? (1) : (0));
 
-    // const uint16_t width = x_end - x_start;
-    // const uint16_t height = y_end - y_start;
-    // const size_t trans_size = axs15231b->trans_size;
+    if ( !trans_size || (width * height) <= trans_size )
+    {
+        size_t len = width * height * bytes_per_pixel;
+        if ( y_start == 0 )
+        {
+            tx_param(axs15231b, io, LCD_CMD_CASET,
+                     (uint8_t[]){
+                         static_cast<uint8_t>((x_start >> 8) & 0xFF),
+                         static_cast<uint8_t>((x_start) & 0xFF),
+                         static_cast<uint8_t>(((x_end - 1) >> 8) & 0xFF),
+                         static_cast<uint8_t>((x_end - 1) & 0xFF),
+                     },
+                     4);
 
-    // y_start_tmp = y_start;
-    // max_line = ((trans_size / width) > height) ? (height) : (trans_size / width);
-    // trans_count = height / max_line + (height % max_line ? (1) : (0));
+            tx_color(axs15231b, io, LCD_CMD_RAMWR, color_data, len);
+        }
+        else
+        {
 
-    // for ( uint16_t i = 0; i < trans_count; i++ )
-    // {
-    //     uint8_t *buff = i % 2 ? axs15231b->buff1 : axs15231b->buff2;
-    //     y_end_tmp = (y_end - y_start_tmp) > max_line ? (y_start_tmp + max_line) : y_end - 1;
+            tx_color(axs15231b, io, LCD_CMD_RAMWRC, color_data, len);
+        }
+    }
+    else
+    {
+        for ( uint16_t i = 0; i < trans_count; i++ )
+        {
+            uint8_t *buff = axs15231b->bounce_buffer[i % 2];
+            y_end_tmp = (y_end - y_start_tmp) > max_line ? (y_start_tmp + max_line) : y_end - 1;
 
-    //     x_draw_start = x_start;
-    //     x_draw_end = x_end;
-    //     y_draw_start = y_start_tmp;
-    //     y_draw_end = y_end_tmp;
+            x_draw_start = x_start;
+            x_draw_end = x_end;
+            y_draw_start = y_start_tmp;
+            y_draw_end = y_end_tmp;
 
-    //     // transfer frame buffer
-    //     size_t len = (x_draw_end - x_draw_start) * (y_draw_end - y_draw_start) * axs15231b->fb_bits_per_pixel;
-    //     // ESP_LOGI(TAG, "xs:%d ys:%d xe:%d ye:%d w:%d h:%d s:%d bs:%d", x_draw_start, y_draw_start, x_draw_end,
-    //     //          y_draw_end, x_draw_end - x_draw_start, y_draw_end - y_draw_start, len,
-    //     //          axs15231b->trans_size * axs15231b->fb_bits_per_pixel);
-    //     uint32_t offset = y_draw_start * width * axs15231b->fb_bits_per_pixel;
-    //     // memcpy(buff, color_data + offset, len);
+            // transfer frame buffer
+            size_t len = (x_draw_end - x_draw_start) * (y_draw_end - y_draw_start) * bytes_per_pixel;
+            // ESP_LOGI(TAG, "xs:%d ys:%d xe:%d ye:%d w:%d h:%d s:%d bs:%d", x_draw_start, y_draw_start, x_draw_end,
+            //          y_draw_end, x_draw_end - x_draw_start, y_draw_end - y_draw_start, len,
+            //          axs15231b->bb_size * bytes_per_pixel);
+            uint32_t offset = y_draw_start * width * bytes_per_pixel;
+            memcpy(buff, color_data + offset, len);
 
-    //     async_memcpy_config_t config = ASYNC_MEMCPY_DEFAULT_CONFIG();
-    //     async_memcpy_handle_t driver = NULL;
+            if ( y_draw_start == 0 )
+            {
 
-    //     // 从用户的上下文中调用
-    //     ESP_ERROR_CHECK(
-    //         esp_async_memcpy(driver_handle, buff, color_data + offset, len, my_async_memcpy_cb, my_semaphore));
-    //     // 其他事项
-    //     xSemaphoreTake(my_semaphore, portMAX_DELAY); // 等待 buffer 复制完成
-    //     if ( y_draw_start == 0 )
-    //     {
+                // define an area of frame memory where MCU can access
+                tx_param(axs15231b, io, LCD_CMD_CASET,
+                         (uint8_t[]){
+                             static_cast<uint8_t>((x_draw_start >> 8) & 0xFF),
+                             static_cast<uint8_t>((x_draw_start) & 0xFF),
+                             static_cast<uint8_t>(((x_draw_end - 1) >> 8) & 0xFF),
+                             static_cast<uint8_t>((x_draw_end - 1) & 0xFF),
+                         },
+                         4);
+                tx_color(axs15231b, io, LCD_CMD_RAMWR, buff, len); // 2C
+            }
+            else
+            {
 
-    //         // define an area of frame memory where MCU can access
-    //         tx_param(axs15231b, io, LCD_CMD_CASET,
-    //                  (uint8_t[]){
-    //                      static_cast<uint8_t>((x_draw_start >> 8) & 0xFF),
-    //                      static_cast<uint8_t>((x_draw_start) & 0xFF),
-    //                      static_cast<uint8_t>(((x_draw_end - 1) >> 8) & 0xFF),
-    //                      static_cast<uint8_t>((x_draw_end - 1) & 0xFF),
-    //                  },
-    //                  4);
-    //         tx_color(axs15231b, io, LCD_CMD_RAMWR, buff, len); // 2C
-    //     }
-    //     else
-    //     {
+                tx_color(axs15231b, io, LCD_CMD_RAMWRC, buff, len); // 3C
+            }
 
-    //         tx_color(axs15231b, io, LCD_CMD_RAMWRC, buff, len); // 3C
-    //     }
-
-    //     y_start_tmp += max_line;
-    // }
-
+            y_start_tmp += max_line;
+        }
+    }
     return ESP_OK;
 }
 

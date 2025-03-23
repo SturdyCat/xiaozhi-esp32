@@ -102,8 +102,11 @@ extern "C"
                                   */
         uint16_t init_cmds_size; /*<! Number of commands in above array */
 
-        uint16_t width;
-        uint16_t height; /*<! Width and height of the panel in pixels */
+        uint16_t h_res; /*!< Horizontal resolution, i.e. the number of pixels in a line */
+        uint16_t v_res; /*!< Vertical resolution, i.e. the number of lines in the frame  */
+        size_t
+            bb_size; // Size of the bounce buffer, in bytes. If not-zero, the driver uses two bounce buffers allocated
+
         struct
         {
             unsigned int use_qspi_interface : 1; /*<! Set to 1 if use QSPI interface, default is SPI interface */
