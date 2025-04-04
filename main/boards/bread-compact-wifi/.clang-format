@@ -1,0 +1,153 @@
+# 基础配置
+Language: Cpp # 编程语言：C++
+BasedOnStyle: Google # 基于Google代码风格
+
+# 缩进相关
+AccessModifierOffset: 0 # 访问修饰符(public/private)缩进偏移量
+ConstructorInitializerIndentWidth: 2 # 构造函数初始化列表缩进
+ContinuationIndentWidth: 2 # 续行缩进宽度
+IndentWidth: 2 # 常规缩进宽度
+UseTab: Never # 禁止使用Tab缩进
+TabWidth: 2 # Tab字符宽度（用于计算）
+
+# 对齐相关
+AlignOperands: true # 对齐操作符
+AlignAfterOpenBracket: Align # 括号后表达式对齐
+AlignTrailingComments: true # 对齐行尾注释
+AlignEscapedNewlines: Right # 右对齐续行符(\)
+AlignConsecutiveAssignments: false # 不自动对齐连续赋值语句的等号
+AlignConsecutiveDeclarations: false # 不自动对齐连续变量声明
+AlignArrayOfStructures: Left # 结构体数组左对齐（适用于C/C++结构体数组初始化）
+
+# 换行策略
+ColumnLimit: 120 # 最大行宽
+BreakStringLiterals: true # 字符串超长时换行
+BinPackParameters: false # 参数列表不压缩换行
+BinPackArguments: false # 函数调用参数不压缩换行
+AllowAllArgumentsOnNextLine: true # 允许函数调用参数分布在多行
+AllowAllConstructorInitializersOnNextLine: false # 要求构造函数初始化列表换行显示
+BreakConstructorInitializers: BeforeComma # 在逗号前换行构造函数的初始化列表
+BreakArrayInitializers: BeforeComma # 数组初始化在逗号前换行
+BreakBeforeInlineASMColon: Always # 内联汇编的冒号前强制换行
+BreakBeforeBinaryOperators: None # 不在二元运算符前换行
+AlwaysBreakBeforeMultilineStrings: true # 多行字符串文本前总是换行
+PenaltyBreakComment: 300 # 注释换行惩罚值
+PenaltyBreakString: 1000 # 字符串换行惩罚值
+PenaltyExcessCharacter: 1000000 # 超限字符惩罚值
+PenaltyBreakAssignment: 100 # 赋值换行惩罚值
+PenaltyBreakFirstLessLess: 120 # << 运算符换行惩罚
+PenaltyReturnTypeOnItsOwnLine: 200 # 返回类型单独换行惩罚
+PenaltyBreakArrayInitializer: 10 # 提高数组初始化式换行的"代价"（减少换行）
+
+# 大括号换行规则 (BraceWrapping)
+BraceWrapping:
+  AfterClass: false # class后不换行
+  AfterControlStatement: false # 控制语句后不换行
+  AfterFunction: false # 函数定义后不换行
+  SplitEmptyFunction: true # 空函数体换行
+  SplitEmptyNamespace: true # 空命名空间换行
+  AfterEnum: false # 枚举类型定义后不换行
+  AfterLambdaBody: true # lambda 表达式主体后换行
+  AfterNamespace: false # 命名空间后不换行
+  BeforeCatch: false # catch 前不换行
+  BeforeElse: false # else 前不换行
+  SplitEmptyRecord: true # 空结构体/类定义换行
+  AfterArrayInitializer: true # 数组初始化后换行
+  BeforeArrayInitializer: true # 数组初始化前换行
+  AfterObjCDeclaration: false # 不在 Objective-C 声明后换行
+  AfterStruct: false # 不在结构体定义后换行
+  AfterUnion: false # 不在联合体定义后换行
+  IndentBraces: false # 不缩进大括号内容
+BreakBeforeBraces: Attach # 大括号与上下文保持同一行（不换行）
+BreakBeforeInheritanceComma: false # 不在继承列表的逗号前换行
+
+# 空格相关
+SpaceBeforeParens: ControlStatements # 控制语句的括号前加空格
+SpaceBeforeRangeBasedForLoopColon: true # range-for循环冒号前加空格
+SpaceInEmptyParentheses: false # 空括号内不加空格
+SpaceBeforeAssignmentOperators: true # 赋值运算符前加空格
+SpaceAfterCStyleCast: false # C风格类型转换后不加空格
+SpaceBeforeCpp11BracedList: true # C++11 列表初始化前加空格
+SpaceAfterTemplateKeyword: true # 模板关键字后加空格（template<int> → template <int>）
+SpaceBeforeCtorInitializerColon: true # 构造函数初始化冒号前加空格
+SpaceBeforeInheritanceColon: true # 继承冒号前加空格
+SpacesInAngles: false # 不在模板尖括号内加空格（保持 vector<int> 紧凑格式）
+SpacesInContainerLiterals: false # 不在容器字面量内加空格（保持 JSON 样式紧凑）
+SpacesInSquareBrackets: false # 不在方括号内加空格（保持 arr[0] 紧凑格式）
+SpacesInParentheses: false # 括号内不加空格
+
+# 模板和继承
+BreakTemplateDeclarations: Yes # 模板声明换行方式
+BreakInheritanceList: BeforeComma # 继承列表在逗号前换行
+AlwaysBreakTemplateDeclarations: Yes # 模板声明换行显示
+
+# 注释格式
+ReflowComments: true # 自动重排注释
+SpacesBeforeTrailingComments: 1 # 行尾注释前空格数
+CommentPragmas: "^ IWYU pragma:" # 匹配 IWYU 特殊注释的正则表达式
+
+# C++11特性
+Cpp11BracedListStyle: true # 使用C++11大括号初始化风格
+
+# 包含文件处理
+SortIncludes: true # 排序#include
+IncludeBlocks: Regroup # 按类别分组包含文件
+IncludeCategories: # 包含文件分类规则
+  - Regex: '^".*' # 本地头文件
+    Priority: 1
+  - Regex: "^<.*" # 系统头文件
+    Priority: 2
+
+# 其他重要配置
+Standard: Cpp11 # 使用C++11标准
+AllowShortFunctionsOnASingleLine: Inline # 短函数保持单行
+AllowShortIfStatementsOnASingleLine: Never # if语句禁止单行形式
+PointerAlignment: Left # 指针符号左对齐
+IndentCaseLabels: true # case 标签缩进
+IndentPPDirectives: None # 预处理指令不缩进
+NamespaceIndentation: None # 命名空间不额外缩进
+AllowShortBlocksOnASingleLine: Empty # 只有空块允许单行显示
+AllowShortCaseLabelsOnASingleLine: false # case 标签不压缩到单行
+AllowShortLoopsOnASingleLine: false # 禁止单行短循环
+CompactNamespaces: false # 不压缩连续命名空间声明
+BinPackArrayInitializers: false # 数组初始化不自动压缩布局
+FixNamespaceComments: true # 自动修正命名空间注释
+MaxEmptyLinesToKeep: 1 # 最大保留连续空行数
+SortUsingDeclarations: true # 对 using 声明排序
+
+# 特殊语法处理
+ForEachMacros: # 识别为 foreach 的宏列表
+  - foreach
+  - Q_FOREACH
+  - BOOST_FOREACH
+
+RawStringFormats: # 原始字符串格式定义
+  - Language: Cpp
+    Delimiters:
+      - cc
+      - CC
+    EnclosingFunctions: # 识别原始字符串的封装函数
+      - "RAW_STRING"
+      - 'R"()"'
+    CanonicalDelimiter: "" # 使用空字符串作为规范分隔符
+
+# 其他
+AllowAllParametersOfDeclarationOnNextLine: false # 不允许函数声明的所有参数换行显示（每个参数必须独占一行）
+AlwaysBreakAfterDefinitionReturnType: None # 函数定义返回类型后不强制换行（保持与函数名同行）
+AlwaysBreakAfterReturnType: None # 函数声明返回类型后不强制换行
+IndentWrappedFunctionNames: false # 不缩进被换行包裹的函数名
+JavaScriptQuotes: Leave # JavaScript 字符串引号保持原样
+JavaScriptWrapImports: true # JavaScript 导入语句自动换行
+KeepEmptyLinesAtTheStartOfBlocks: true # 保留代码块开头的空行
+MacroBlockBegin: "" # 自定义宏块起始标识（空表示无特殊标识）
+MacroBlockEnd: "" # 自定义宏块结束标识
+ObjCBlockIndentWidth: 2 # Objective-C 代码块缩进 2 空格
+ObjCSpaceAfterProperty: false # Objective-C 属性后不加空格
+ObjCSpaceBeforeProtocolList: true # Objective-C 协议列表前加空格
+PenaltyBreakBeforeFirstCallParameter: 100 # 尽量避免在第一个函数参数前换行
+AllowShortLambdasOnASingleLine: false # 不允许短 lambda 表达式放在单行
+DisableFormat: false # 启用代码格式化（设为 true 会禁用格式化）
+ExperimentalAutoDetectBinPacking: false # 不自动检测参数包样式
+IncludeIsMainRegex: "([-_](test|unittest))?$" # 主函数文件的匹配正则表达式（识别测试文件）
+DerivePointerAlignment: false # 不自动推导指针对齐方式（保持原样）
+ConstructorInitializerAllOnOneLineOrOnePerLine: true # 构造函数初始化列表：全放一行或每个初始化器独占一行

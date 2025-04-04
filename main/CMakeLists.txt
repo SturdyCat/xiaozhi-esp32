@@ -195,16 +195,16 @@ target_compile_definitions(${COMPONENT_LIB}
                     )
 
 # 添加生成规则
-add_custom_command(
-    OUTPUT ${LANG_HEADER}
-    COMMAND python ${PROJECT_DIR}/scripts/gen_lang.py
-            --input "${LANG_JSON}"
-            --output "${LANG_HEADER}"
-    DEPENDS
-        ${LANG_JSON}
-        ${PROJECT_DIR}/scripts/gen_lang.py
-    COMMENT "Generating ${LANG_DIR} language config"
-)
+# add_custom_command(
+#     OUTPUT ${LANG_HEADER}
+#     COMMAND python ${PROJECT_DIR}/scripts/gen_lang.py
+#             --input "${LANG_JSON}"
+#             --output "${LANG_HEADER}"
+#     DEPENDS
+#         ${LANG_JSON}
+#         ${PROJECT_DIR}/scripts/gen_lang.py
+#     COMMENT "Generating ${LANG_DIR} language config"
+# )
 
 # 强制建立生成依赖
 add_custom_target(lang_header ALL
