@@ -1,19 +1,22 @@
-#include "wifi_board.h"
-#include "codecs/no_audio_codec.h"
-#include "display/oled_display.h"
-#include "system_reset.h"
 #include "application.h"
 #include "button.h"
+#include "codecs/no_audio_codec.h"
 #include "config.h"
-#include "mcp_server.h"
+#include "display/oled_display.h"
 #include "lamp_controller.h"
 #include "led/single_led.h"
-#include "assets/lang_config.h"
+#include "mcp_server.h"
+#include "power_save_timer.h"
+#include "system_reset.h"
+#include "wifi_board.h"
 
-#include <esp_log.h>
 #include <driver/i2c_master.h>
+#include <driver/rtc_io.h>
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_vendor.h>
+#include <esp_log.h>
+#include <esp_sleep.h>
+#include <wifi_station.h>
 
 #ifdef SH1106
 #include <esp_lcd_panel_sh1106.h>
@@ -29,8 +32,40 @@ private:
     Display* display_ = nullptr;
     Button boot_button_;
     Button touch_button_;
-    Button volume_up_button_;
-    Button volume_down_button_;
+    //   Button volume_up_button_;
+    //   Button volume_down_button_;
+    PowerSaveTimer* power_save_timer_;
+
+    void InitializePowerSaveTimer() {
+        power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
+        power_save_timer_->OnEnterSleepMode([this]() {
+            ESP_LOGI(TAG, "Enabling sleep mode");
+            display_->SetChatMessage("system", "");
+            display_->SetEmotion("sleepy");
+
+            auto codec = GetAudioCodec();
+            codec->EnableInput(false);
+        });
+        power_save_timer_->OnExitSleepMode([this]() {
+            auto codec = GetAudioCodec();
+            codec->EnableInput(true);
+
+            display_->SetChatMessage("system", "");
+            display_->SetEmotion("neutral");
+        });
+        power_save_timer_->OnShutdownRequest([this]() {
+            ESP_LOGI(TAG, "Shutting down");
+            const gpio_num_t ext_wakeup_pin = GPIO_NUM_6;
+            esp_sleep_enable_ext0_wakeup(ext_wakeup_pin, 0);
+            rtc_gpio_pullup_en(ext_wakeup_pin);
+            rtc_gpio_pulldown_dis(ext_wakeup_pin);
+
+            esp_lcd_panel_disp_on_off(panel_, false);  // 关闭显示
+
+            esp_deep_sleep_start();
+        });
+        power_save_timer_->SetEnabled(true);
+    }
 
     void InitializeDisplayI2c() {
         i2c_master_bus_config_t bus_config = {
@@ -41,9 +76,10 @@ private:
             .glitch_ignore_cnt = 7,
             .intr_priority = 0,
             .trans_queue_depth = 0,
-            .flags = {
-                .enable_internal_pullup = 1,
-            },
+            .flags =
+                {
+                    .enable_internal_pullup = 1,
+                },
         };
         ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &display_i2c_bus_));
     }
@@ -58,10 +94,11 @@ private:
             .dc_bit_offset = 6,
             .lcd_cmd_bits = 8,
             .lcd_param_bits = 8,
-            .flags = {
-                .dc_low_on_data = 0,
-                .disable_control_phase = 0,
-            },
+            .flags =
+                {
+                    .dc_low_on_data = 0,
+                    .disable_control_phase = 0,
+                },
             .scl_speed_hz = 400 * 1000,
         };
 
@@ -97,7 +134,8 @@ private:
         ESP_LOGI(TAG, "Turning display on");
         ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
 
-        display_ = new OledDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+        display_ = new OledDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT,
+                                   DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
     }
 
     void InitializeButtons() {
@@ -105,63 +143,29 @@ private:
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting) {
                 EnterWifiConfigMode();
-                return;
             }
             app.ToggleChatState();
         });
-        touch_button_.OnPressDown([this]() {
-            Application::GetInstance().StartListening();
-        });
-        touch_button_.OnPressUp([this]() {
-            Application::GetInstance().StopListening();
-        });
-
-        volume_up_button_.OnClick([this]() {
-            auto codec = GetAudioCodec();
-            auto volume = codec->output_volume() + 10;
-            if (volume > 100) {
-                volume = 100;
-            }
-            codec->SetOutputVolume(volume);
-            GetDisplay()->ShowNotification(Lang::Strings::VOLUME + std::to_string(volume));
-        });
-
-        volume_up_button_.OnLongPress([this]() {
-            GetAudioCodec()->SetOutputVolume(100);
-            GetDisplay()->ShowNotification(Lang::Strings::MAX_VOLUME);
-        });
-
-        volume_down_button_.OnClick([this]() {
-            auto codec = GetAudioCodec();
-            auto volume = codec->output_volume() - 10;
-            if (volume < 0) {
-                volume = 0;
-            }
-            codec->SetOutputVolume(volume);
-            GetDisplay()->ShowNotification(Lang::Strings::VOLUME + std::to_string(volume));
-        });
-
-        volume_down_button_.OnLongPress([this]() {
-            GetAudioCodec()->SetOutputVolume(0);
-            GetDisplay()->ShowNotification(Lang::Strings::MUTED);
-        });
+        touch_button_.OnPressDown([this]() { Application::GetInstance().StartListening(); });
+        touch_button_.OnPressUp([this]() { Application::GetInstance().StopListening(); });
     }
 
     // 物联网初始化，逐步迁移到 MCP 协议
-    void InitializeTools() {
-        static LampController lamp(LAMP_GPIO);
-    }
+    void InitializeTools() { static LampController lamp(LAMP_GPIO); }
 
 public:
-    CompactWifiBoard() :
-        boot_button_(BOOT_BUTTON_GPIO),
-        touch_button_(TOUCH_BUTTON_GPIO),
-        volume_up_button_(VOLUME_UP_BUTTON_GPIO),
-        volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
+    CompactWifiBoard()
+        : boot_button_(BOOT_BUTTON_GPIO),
+          touch_button_(TOUCH_BUTTON_GPIO)
+    // volume_up_button_(VOLUME_UP_BUTTON_GPIO),
+    // volume_down_button_(VOLUME_DOWN_BUTTON_GPIO)
+    {
         InitializeDisplayI2c();
         InitializeSsd1306Display();
         InitializeButtons();
         InitializeTools();
+
+        InitializePowerSaveTimer();
     }
 
     virtual Led* GetLed() override {
@@ -172,16 +176,24 @@ public:
     virtual AudioCodec* GetAudioCodec() override {
 #ifdef AUDIO_I2S_METHOD_SIMPLEX
         static NoAudioCodecSimplex audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-            AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK, AUDIO_I2S_SPK_GPIO_DOUT, AUDIO_I2S_MIC_GPIO_SCK, AUDIO_I2S_MIC_GPIO_WS, AUDIO_I2S_MIC_GPIO_DIN);
+                                               AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK,
+                                               AUDIO_I2S_SPK_GPIO_DOUT, AUDIO_I2S_MIC_GPIO_SCK,
+                                               AUDIO_I2S_MIC_GPIO_WS, AUDIO_I2S_MIC_GPIO_DIN);
 #else
         static NoAudioCodecDuplex audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-            AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN);
+                                              AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS,
+                                              AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN);
 #endif
         return &audio_codec;
     }
 
-    virtual Display* GetDisplay() override {
-        return display_;
+    virtual Display* GetDisplay() override { return display_; }
+
+    virtual void SetPowerSaveLevel(PowerSaveLevel level) override {
+        if (level != PowerSaveLevel::LOW_POWER) {
+            power_save_timer_->WakeUp();
+        }
+        WifiBoard::SetPowerSaveLevel(level);
     }
 };
 
