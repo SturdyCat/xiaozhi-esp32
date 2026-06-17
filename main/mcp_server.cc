@@ -283,10 +283,8 @@ void McpServer::AddUserOnlyTools() {
     }
 #endif // HAVE_LVGL
 
-    // Assets download url
-    auto& assets = Assets::GetInstance();
-    if (assets.partition_valid()) {
-        AddUserOnlyTool("self.assets.set_download_url", "Set the download url for the assets",
+    // Assets download url (always registered — Settings storage works regardless of partition layout)
+    AddUserOnlyTool("self.assets.set_download_url", "Set the download url for the assets",
             PropertyList({
                 Property("url", kPropertyTypeString)
             }),
@@ -296,7 +294,6 @@ void McpServer::AddUserOnlyTools() {
                 settings.SetString("download_url", url);
                 return true;
             });
-    }
 }
 
 void McpServer::AddTool(McpTool* tool) {
