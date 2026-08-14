@@ -8,12 +8,16 @@
 #if HAVE_LVGL
 #include <spi_flash_mmap.h>
 #include "display/lcd_display.h"
+#include "display/lvgl_display/lvgl_display.h"
 #endif
 
 #include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <cbin_font.h>
+#include <noto_font_bundle.h>
+
+#include <cstring>
 
 #define TAG "Assets"
 #define PARTITION_LABEL "assets"
@@ -27,6 +31,7 @@ struct mmap_assets_table {
 };
 
 Assets::Assets() {
+    UseBuiltInTextFontCapability();
 #if HAVE_LVGL
     strategy_ = std::make_unique<Assets::LvglStrategy>();
 #else
@@ -57,10 +62,23 @@ bool Assets::InitializePartition() {
 }
 
 void Assets::UnApplyPartition() {
+    UseBuiltInTextFontCapability();
     if (strategy_) {
         strategy_->UnApplyPartition(this);
     }
 }
+
+void Assets::UseBuiltInTextFontCapability() {
+    text_font_capability_ = {
+        .glyph_push = true,
+        .bundle = NOTO_FONT_BUNDLE_ID,
+        .charset = "basic",
+        .size = TEXT_FONT_SIZE,
+        .bpp = TEXT_FONT_BPP,
+    };
+}
+
+void Assets::DisableTextFontGlyphPush() { text_font_capability_ = {}; }
 
 bool Assets::GetAssetData(const std::string& name, void*& ptr, size_t& size) {
     return strategy_ ? strategy_->GetAssetData(this, name, ptr, size) : false;
@@ -249,15 +267,39 @@ bool Assets::LvglStrategy::Apply(Assets* assets, bool refresh_display_theme) {
         std::string fonts_text_file = font->valuestring;
         if (assets->GetAssetData(fonts_text_file, ptr, size)) {
             auto text_font = std::make_shared<LvglCBinFont>(ptr);
-            if (text_font->font() == nullptr) {
-                ESP_LOGE(TAG, "Failed to load fonts.bin");
-                return false;
-            }
-            if (light_theme != nullptr) {
-                light_theme->set_text_font(text_font);
-            }
-            if (dark_theme != nullptr) {
-                dark_theme->set_text_font(text_font);
+            auto display = dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay());
+            if (text_font->font() == nullptr || display == nullptr ||
+                !display->SetTextFont(text_font)) {
+                ESP_LOGW(TAG, "Ignoring invalid text font asset %s", fonts_text_file.c_str());
+            } else {
+                assets->DisableTextFontGlyphPush();
+
+                cJSON* metadata = cJSON_GetObjectItem(root, "text_font_meta");
+                cJSON* charset = cJSON_GetObjectItem(metadata, "charset");
+                cJSON* font_size = cJSON_GetObjectItem(metadata, "size");
+                cJSON* font_bpp = cJSON_GetObjectItem(metadata, "bpp");
+                cJSON* bundle = cJSON_GetObjectItem(metadata, "bundle");
+                bool supports_glyph_push =
+                    cJSON_IsString(charset) &&
+                    (std::strcmp(charset->valuestring, "basic") == 0 ||
+                     std::strcmp(charset->valuestring, "common") == 0) &&
+                    cJSON_IsNumber(font_size) && font_size->valueint > 0 &&
+                    font_size->valuedouble == font_size->valueint && cJSON_IsNumber(font_bpp) &&
+                    font_bpp->valuedouble == font_bpp->valueint &&
+                    (font_bpp->valueint == 1 || font_bpp->valueint == 4) &&
+                    font_bpp->valueint == text_font->bpp() && cJSON_IsString(bundle) &&
+                    bundle->valuestring[0] != '\0' && std::strlen(bundle->valuestring) <= 64;
+                if (supports_glyph_push) {
+                    assets->text_font_capability_ = {
+                        .glyph_push = true,
+                        .bundle = bundle->valuestring,
+                        .charset = charset->valuestring,
+                        .size = font_size->valueint,
+                        .bpp = font_bpp->valueint,
+                    };
+                } else {
+                    ESP_LOGW(TAG, "Loaded custom text font without compatible glyph push metadata");
+                }
             }
         } else {
             ESP_LOGE(TAG, "The font file %s is not found", fonts_text_file.c_str());
@@ -291,6 +333,7 @@ bool Assets::LvglStrategy::Apply(Assets* assets, bool refresh_display_theme) {
         if (dark_theme != nullptr) {
             dark_theme->set_emoji_collection(custom_emoji_collection);
         }
+        Board::GetInstance().GetDisplay()->SetEmojiCollection(custom_emoji_collection);
     }
 
     cJSON* skin = cJSON_GetObjectItem(root, "skin");
@@ -411,17 +454,16 @@ void Assets::EmoteStrategy::UnApplyPartition(Assets* assets) {
 
 bool Assets::EmoteStrategy::GetAssetData(Assets* assets, const std::string& name, void*& ptr,
                                          size_t& size) {
-    if (auto emote_display = Board::GetInstance().GetDisplay()->AsEmoteDisplay()) {
-        if (emote_display->GetEmoteHandle() != nullptr) {
-            const uint8_t* data = nullptr;
-            size_t data_size = 0;
-            if (ESP_OK == emote_get_asset_data_by_name(emote_display->GetEmoteHandle(),
-                                                       name.c_str(), &data, &data_size)) {
-                ptr = const_cast<void*>(static_cast<const void*>(data));
-                size = data_size;
-                return true;
-            }
-            ESP_LOGE(TAG, "Failed to get asset data by name: %s", name.c_str());
+    auto display = Board::GetInstance().GetDisplay();
+    auto* emote_display = dynamic_cast<emote::EmoteDisplay*>(display);
+    if (emote_display && emote_display->GetEmoteHandle() != nullptr) {
+        const uint8_t* data = nullptr;
+        size_t data_size = 0;
+        if (ESP_OK == emote_get_asset_data_by_name(emote_display->GetEmoteHandle(), name.c_str(),
+                                                   &data, &data_size)) {
+            ptr = const_cast<void*>(static_cast<const void*>(data));
+            size = data_size;
+            return true;
         }
     }
     (void)assets;  // Unused parameter
