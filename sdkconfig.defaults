@@ -77,3 +77,6 @@ CONFIG_LV_USE_WIN=n
 
 CONFIG_LV_BUILD_EXAMPLES=n
 CONFIG_LV_BUILD_DEMOS=n
+
+# 自建服务端（xiaozhi-server-rust）：OTA 引导 + WebSocket 接入
+CONFIG_OTA_URL="http://192.168.99.250:8000/api/ota/"

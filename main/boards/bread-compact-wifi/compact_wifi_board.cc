@@ -9,13 +9,12 @@
 #include "power_save_timer.h"
 #include "system_reset.h"
 #include "wifi_board.h"
+#include "wifi_manager.h"
 
 #include <driver/i2c_master.h>
-#include <driver/rtc_io.h>
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_vendor.h>
 #include <esp_log.h>
-#include <esp_sleep.h>
 #include <wifi_station.h>
 
 #ifdef SH1106
@@ -37,32 +36,28 @@ private:
     PowerSaveTimer* power_save_timer_;
 
     void InitializePowerSaveTimer() {
-        power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
+        // 第三个参数为 shutdown 时间：设为 -1 禁用深度睡眠。
+        // 深度睡眠下 CPU 全停，语音唤醒词物理上无法工作。
+        power_save_timer_ = new PowerSaveTimer(-1, 60, -1);
         power_save_timer_->OnEnterSleepMode([this]() {
             ESP_LOGI(TAG, "Enabling sleep mode");
             display_->SetChatMessage("system", "");
             display_->SetEmotion("sleepy");
 
-            auto codec = GetAudioCodec();
-            codec->EnableInput(false);
+            // 保留麦克风输入，使「你好小智」唤醒词在待机时持续监听。
+            // 省电手段改为：关闭 OLED 显示 + 断开 WiFi（省电大头）。
+            esp_lcd_panel_disp_on_off(panel_, false);  // 关闭显示
+            WifiManager::GetInstance().StopStation();   // 断开 WiFi
         });
         power_save_timer_->OnExitSleepMode([this]() {
             auto codec = GetAudioCodec();
             codec->EnableInput(true);
 
+            esp_lcd_panel_disp_on_off(panel_, true);   // 点亮显示
+            WifiManager::GetInstance().StartStation();  // 恢复 WiFi 连接
+
             display_->SetChatMessage("system", "");
             display_->SetEmotion("neutral");
-        });
-        power_save_timer_->OnShutdownRequest([this]() {
-            ESP_LOGI(TAG, "Shutting down");
-            const gpio_num_t ext_wakeup_pin = GPIO_NUM_6;
-            esp_sleep_enable_ext0_wakeup(ext_wakeup_pin, 0);
-            rtc_gpio_pullup_en(ext_wakeup_pin);
-            rtc_gpio_pulldown_dis(ext_wakeup_pin);
-
-            esp_lcd_panel_disp_on_off(panel_, false);  // 关闭显示
-
-            esp_deep_sleep_start();
         });
         power_save_timer_->SetEnabled(true);
     }
